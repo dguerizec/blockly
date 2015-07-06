@@ -79,8 +79,13 @@ class Gen_uncompressed(threading.Thread):
     f = open(target_filename, "w")
     f.write(HEADER)
     f.write("""
+var isNodeJS = !!(typeof module !== 'undefined' && module.exports);
+
 // 'this' is 'window' in a browser, or 'global' in node.js.
 this.BLOCKLY_DIR = (function() {
+  if(isNodeJS) {
+    return __dirname;
+  }
   // Find name of current directory.
   var scripts = document.getElementsByTagName('script');
   var re = new RegExp('(.+)[\/]blockly_uncompressed\.js$');
@@ -97,13 +102,19 @@ this.BLOCKLY_DIR = (function() {
 this.BLOCKLY_BOOT = function() {
 // Execute after Closure has loaded.
 if (!this.goog) {
-  alert('Error: Closure not found.  Read this:\\n' +
+  if(!isNodeJS) {
+    alert('Error: Closure not found.  Read this:\\n' +
         'developers.google.com/blockly/hacking/closure');
+  } else {
+    console.error('Error: Closure not found.  Read this:\\n' +
+        'developers.google.com/blockly/hacking/closure');
+  }
 }
 
 // Build map of all dependencies (used and unused).
 var dir = this.BLOCKLY_DIR.match(/[^\\/]+$/)[0];
 """)
+
     add_dependency = []
     base_path = calcdeps.FindClosureBasePath(self.search_paths)
     for dep in calcdeps.BuildDependenciesFromFiles(self.search_paths):
@@ -134,15 +145,19 @@ delete this.BLOCKLY_BOOT;
 
 if (typeof DOMParser == 'undefined' && typeof require == 'function') {
   // Node.js needs DOMParser loaded separately.
-  var DOMParser = require('xmldom').DOMParser;
+  global.DOMParser = require('xmldom').DOMParser;
+  require(__dirname+'/../closure-library/closure/goog/bootstrap/nodejs');
+  this.goog = goog;
+  this.BLOCKLY_BOOT();
+  module.exports = Blockly;
+} else {
+  // Delete any existing Closure (e.g. Soy's nogoog_shim).
+  document.write('<script>var goog = undefined;</script>');
+  // Load fresh Closure Library.
+  document.write('<script src="' + this.BLOCKLY_DIR +
+      '/../closure-library/closure/goog/base.js"></script>');
+  document.write('<script>this.BLOCKLY_BOOT()</script>');
 }
-
-// Delete any existing Closure (e.g. Soy's nogoog_shim).
-document.write('<script>var goog = undefined;</script>');
-// Load fresh Closure Library.
-document.write('<script src="' + this.BLOCKLY_DIR +
-    '/../closure-library/closure/goog/base.js"></script>');
-document.write('<script>this.BLOCKLY_BOOT()</script>');
 """)
     f.close()
     print("SUCCESS: " + target_filename)
